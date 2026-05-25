@@ -127,7 +127,7 @@ def send_approval_email(score_data):
     date_str   = datetime.now().strftime("%A, %d %B %Y")
 
     from shared.config import APPROVAL_SERVER_URL
-approve_url = f"{APPROVAL_SERVER_URL}/approve?score={score}&label={label.replace(' ', '+')}"
+    approve_url = f"{APPROVAL_SERVER_URL}/approve?score={score}&label={label.replace(' ', '+')}"
     today       = datetime.now().strftime("%Y%m%d")
 
     score_colour = "#22c55e" if score > 0 else "#ef4444" if score < 0 else "#94a3b8"
