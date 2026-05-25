@@ -1,0 +1,74 @@
+<!-- 
+  INDIAN MARKET GURU — Agent Data Bridge
+  Paste this into Ghost: Settings → Code injection → Site footer
+  This reads data published by the three agents and updates the site live.
+-->
+<script>
+(function () {
+  var GHOST_URL = 'https://indian-market-guru.ghost.io';
+  var CONTENT_KEY = 'aef48258333e3c052c6a02ae54';
+
+  // ── READ AGENT DATA ────────────────────────────────────────────
+  function fetchAgentData(key, callback) {
+    var url = GHOST_URL + '/ghost/api/content/pages/slug/agent-data-' + key + '/?key=' + CONTENT_KEY;
+    fetch(url)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.pages || !data.pages[0]) return;
+        var html = data.pages[0].html;
+        var match = html.match(/<script[^>]*>([\s\S]*?)<\/script>/);
+        if (match) {
+          try { callback(JSON.parse(match[1])); } catch(e) {}
+        }
+      })
+      .catch(function() {});
+  }
+
+  // ── UPDATE SENTIMENT NEEDLE ────────────────────────────────────
+  function updateSentiment() {
+    fetchAgentData('sentiment-score', function(data) {
+      var needle   = document.getElementById('needle');
+      var word     = document.getElementById('sent-word');
+      var scoreEl  = document.querySelector('.sentiment-score');
+
+      if (needle) needle.style.left = data.needle_pct + '%';
+      if (word) {
+        word.textContent  = data.label;
+        word.style.color  = data.label_colour;
+      }
+      if (scoreEl) {
+        var sign = data.score >= 0 ? '+' : '';
+        scoreEl.textContent = 'Score: ' + sign + data.score + ' / 100';
+      }
+    });
+  }
+
+  // ── UPDATE NEWS TICKER ─────────────────────────────────────────
+  function updateTicker() {
+    fetchAgentData('ticker-html', function(data) {
+      var existing = document.querySelector('.ticker-strip');
+      if (existing && data) {
+        var temp = document.createElement('div');
+        temp.innerHTML = data;
+        var newTicker = temp.querySelector('#img-ticker-container');
+        if (newTicker) {
+          existing.innerHTML = newTicker.innerHTML;
+        }
+      }
+    });
+  }
+
+  // ── INIT ───────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', function() {
+    updateSentiment();
+    updateTicker();
+
+    // Refresh sentiment every 5 minutes
+    setInterval(updateSentiment, 300000);
+
+    // Refresh ticker every 30 minutes
+    setInterval(updateTicker, 1800000);
+  });
+
+})();
+</script>

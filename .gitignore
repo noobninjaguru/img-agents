@@ -1,0 +1,4 @@
+shared/config.py
+shared/latest_news.json
+__pycache__
+.env

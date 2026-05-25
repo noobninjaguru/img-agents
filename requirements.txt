@@ -1,0 +1,5 @@
+anthropic>=0.25.0
+feedparser>=6.0.0
+requests>=2.31.0
+schedule>=1.2.0
+PyJWT>=2.8.0

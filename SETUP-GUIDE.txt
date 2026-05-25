@@ -1,0 +1,94 @@
+================================================================
+INDIAN MARKET GURU — Agent System Setup Guide
+Three agents, one command to run them all.
+================================================================
+
+WHAT YOU'LL NEED
+----------------
+1. Your Anthropic API key  →  console.anthropic.com
+2. Your Ghost Admin API key  →  Ghost dashboard → Settings → Integrations
+3. A Gmail app password  →  myaccount.google.com → Security → App passwords
+4. Python already installed (check: type "python3 --version" in Terminal)
+
+================================================================
+STEP 1 — INSTALL DEPENDENCIES
+================================================================
+Open Terminal on your Mac and run:
+
+    cd path/to/img-agents
+    pip3 install -r requirements.txt
+
+================================================================
+STEP 2 — FILL IN YOUR CREDENTIALS
+================================================================
+Open the file:  shared/config.py
+
+Fill in every field:
+  ANTHROPIC_API_KEY   →  your Claude API key
+  GHOST_ADMIN_API_KEY →  from Ghost Settings → Integrations → Add integration
+  SMTP_USER           →  your Gmail address
+  SMTP_PASSWORD       →  your Gmail App Password (not your normal Gmail password)
+  NOTIFY_EMAIL        →  babi.naren@gmail.com  (already set)
+
+================================================================
+STEP 3 — GET YOUR GHOST CONTENT API KEY
+================================================================
+1. Ghost dashboard → Settings → Integrations → Add custom integration
+2. Name it "Agent Bridge"
+3. Copy the Content API key
+4. Open ghost-code-injection-footer.html
+5. Replace YOUR_GHOST_CONTENT_API_KEY with the key you copied
+
+================================================================
+STEP 4 — ADD THE BRIDGE SCRIPT TO GHOST
+================================================================
+1. Ghost dashboard → Settings → Code injection
+2. Copy everything from ghost-code-injection-footer.html
+3. Paste into the "Site footer" box
+4. Click Save
+
+================================================================
+STEP 5 — START THE AGENTS
+================================================================
+In Terminal:
+
+    python3 master.py
+
+You'll see:
+  ✓ Agent 1 runs immediately — fetches news, updates ticker
+  ✓ Every 2 hours — ticker refreshes automatically
+  ✓ 8:30 AM IST weekdays — sentiment email arrives in your inbox
+  ✓ 8:00 PM IST daily — editor audit email arrives
+
+================================================================
+STEP 6 — DAILY ROUTINE (2 MINUTES)
+================================================================
+Each morning around 8:30-8:45 AM:
+1. Open the sentiment email from Indian Market Guru
+2. Review the score, reasoning, positives and risks
+3. Click "APPROVE & PUBLISH SCORE" if you agree
+   OR click "ADJUST SCORE" to email yourself and reply with your number
+4. The needle on your website updates instantly
+
+That's it. The rest runs automatically.
+
+================================================================
+KEEPING IT RUNNING
+================================================================
+The agents need master.py running on your Mac.
+If you close Terminal, the agents stop.
+
+For now: keep a Terminal window open while you work.
+Later: we can deploy to a free cloud server (Railway/Render)
+so it runs 24/7 without your Mac needing to be on.
+
+================================================================
+COSTS (approximate)
+================================================================
+Agent 1 (News ticker):   ~₹40-60/month  (12 runs/day × 30 days)
+Agent 2 (Sentiment):     ~₹20-30/month  (1 run/day × 20 weekdays)
+Agent 3 (Editor):        ~₹30-50/month  (1 run/day × 30 days)
+Total Claude API cost:   ~₹90-140/month
+
+Anthropic API:  console.anthropic.com → Billing → Add ₹500 to start
+================================================================
