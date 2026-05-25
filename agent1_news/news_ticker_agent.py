@@ -91,7 +91,7 @@ def build_ticker_html(headlines):
 
 def push_to_ghost(headlines, ticker_html):
     import os, json as json_mod
-    from shared.ghost_api import update_gist, update_site_metadata
+    from shared.ghost_api import update_gist
     from shared.config import GIST_TICKER_ID
 
     data = {"updated_at": datetime.now(timezone.utc).isoformat(), "headlines": headlines}
@@ -103,7 +103,6 @@ def push_to_ghost(headlines, ticker_html):
 
     # Push to GitHub Gist — website reads from here
     update_gist(GIST_TICKER_ID, "ticker.json", data)
-    update_site_metadata("news-ticker", json_mod.dumps(data))
     print(f"  Pushed {len(headlines)} headlines to GitHub Gist")
 
 def run():

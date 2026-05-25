@@ -269,7 +269,7 @@ def start_approval_server():
 
 
 def publish_score(score, label):
-    from shared.ghost_api import update_gist, update_site_metadata
+    from shared.ghost_api import update_gist
     from shared.config import GIST_SENTIMENT_ID
     import json
 
@@ -291,9 +291,7 @@ def publish_score(score, label):
     }
 
     update_gist(GIST_SENTIMENT_ID, "sentiment.json", data)
-    update_site_metadata("sentiment-score", json.dumps(data))
     print(f"  Score published: {'+' if score > 0 else ''}{score} ({label})")
-
 
 # ── MAIN ─────────────────────────────────────────────────────────
 
