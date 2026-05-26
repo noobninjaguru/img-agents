@@ -38,22 +38,16 @@ from shared.ghost_api import get_all_posts
 # ── STEP 1: GATHER SITE CONTENT ──────────────────────────────────
 
 def gather_site_content():
-    """Pull recent posts and build a picture of the site."""
-    posts = get_all_posts(limit=10)
-
-    content_summary = []
-    for post in posts:
-        content_summary.append({
-            "title":      post.get("title", ""),
-            "excerpt":    post.get("custom_excerpt", ""),
-            "tags":       [t["name"] for t in post.get("tags", [])],
-            "word_count": post.get("reading_time", 0),
-            "published":  post.get("published_at", "")[:10],
-            "content":    post.get("plaintext", "")[:2000],  # first 2000 chars
-        })
-
-    print(f"  ✓ Gathered {len(content_summary)} posts for audit")
-    return content_summary
+    """Fetch recent posts using the public Content API — no auth needed."""
+    import requests
+    from shared.config import GHOST_URL
+    
+    CONTENT_KEY = "aef48258333e3c052c6a02ae54"
+    url = f"{GHOST_URL}/ghost/api/content/posts/?key={CONTENT_KEY}&limit=10&include=tags"
+    res = requests.get(url)
+    res.raise_for_status()
+    posts = res.json().get("posts", [])
+    return posts
 
 
 # ── STEP 2: RUN THE AUDIT ─────────────────────────────────────────
@@ -69,10 +63,10 @@ def run_audit(posts, trigger="scheduled"):
     for i, post in enumerate(posts):
         posts_text += f"""
 POST {i+1}: {post['title']}
-Published: {post['published']} | Tags: {', '.join(post['tags'])}
-Excerpt: {post['excerpt']}
+Published: {post.get('published_at', 'unknown')} | Tags: {', '.join([t['name'] for t in post.get('tags', [])])}
+Excerpt: {post.get('excerpt') or post.get('custom_excerpt') or 'No excerpt'}
 Content preview:
-{post['content'][:1000]}
+{post.get('excerpt', post.get('custom_excerpt', 'No content available'))[:1000]}
 {'—'*40}
 """
 
@@ -154,8 +148,11 @@ Respond with a JSON object. No markdown, no preamble, valid JSON only.
     )
 
     raw = response.content[0].text.strip()
+    start = raw.find("{")
+    end = raw.rfind("}") + 1
+    if start != -1:
+        raw = raw[start:end]
     return json.loads(raw)
-
 
 # ── STEP 3: FORMAT AND SEND EMAIL REPORT ─────────────────────────
 

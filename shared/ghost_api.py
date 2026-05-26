@@ -10,15 +10,22 @@ from shared.config import GHOST_URL, GHOST_ADMIN_API_KEY
 
 
 def get_ghost_token():
-    """Generate a short-lived JWT token for Ghost Admin API."""
     key_id, secret = GHOST_ADMIN_API_KEY.split(":")
-    iat = int(time.time())
+    secret_bytes = bytes.fromhex(secret)
+    now = int(time.time())
     payload = {
-        "iat": iat,
-        "exp": iat + 300,
+        "iat": now,
+        "exp": now + 300,
         "aud": "/admin/"
     }
-    token = jwt.encode(payload, bytes.fromhex(secret), algorithm="HS256", headers={"kid": key_id})
+    token = jwt.encode(
+        payload,
+        secret_bytes,
+        algorithm="HS256",
+        headers={"kid": key_id}
+    )
+    if isinstance(token, bytes):
+        token = token.decode("utf-8")
     return token
 
 
