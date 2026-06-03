@@ -31,3 +31,5 @@ RSS_FEEDS = [
     {"name": "Yahoo Finance",           "url": "https://finance.yahoo.com/news/rssindex"},
     {"name": "Reuters Business",        "url": "https://feeds.reuters.com/reuters/businessNews"},
 ]
+SUPABASE_URL         = os.environ.get("SUPABASE_URL", "https://bkdjdvzuwiwhcnzeorjx.supabase.co")
+SUPABASE_KEY         = os.environ.get("SUPABASE_KEY", "sb_secret_akIwQp4Ynze6tVinoEFgOg_qGQ08xxQ")

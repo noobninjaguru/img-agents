@@ -92,3 +92,17 @@ if __name__ == "__main__":
     while True:
         schedule.run_pending()
         time.sleep(30)  # check every 30 seconds
+
+# Agent 4: Daily brief Mon-Fri 8AM IST (02:30 UTC), Sat/Sun 9AM IST (03:30 UTC)
+from agent4_content.content_agent import run as run_content
+
+def run_content_weekday():
+    if datetime.now().weekday() < 5:
+        safe_run("Agent 4 — Content Writer", run_content, "scheduled")
+
+def run_content_weekend():
+    if datetime.now().weekday() >= 5:
+        safe_run("Agent 4 — Content Writer", run_content, "scheduled")
+
+schedule.every().day.at("02:30").do(run_content_weekday)
+schedule.every().day.at("03:30").do(run_content_weekend)
