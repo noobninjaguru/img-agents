@@ -45,17 +45,11 @@ def ist_now():
 
 
 def last_trading_day(ref=None):
-    """Return last weekday date from ref (defaults to today IST)."""
-    d = (ref or ist_now()).date()
-    # If today is Mon, go back to Friday
+    """Always return the most recent completed trading day."""
+    # Agent runs at 8AM IST — always use previous completed trading day
+    d = (ref or ist_now()).date() - timedelta(days=1)
     while d.weekday() >= 5:
         d -= timedelta(days=1)
-    # If called before market close on a weekday, use previous day
-    n = ref or ist_now()
-    if n.weekday() < 5 and n.hour < 16:
-        d -= timedelta(days=1)
-        while d.weekday() >= 5:
-            d -= timedelta(days=1)
     return d
 
 
@@ -66,20 +60,22 @@ def get_day_data(date_str):
     try:
         url = (
             f"{SUPABASE_URL}/rest/v1/ohlcv_data"
-            f"?symbol=eq.NIFTY 50"
-            f"&datetime=gte.{date_str}T09:00:00+05:30"
-            f"&datetime=lte.{date_str}T15:35:00+05:30"
+            f"?symbol=eq.NIFTY%2050"
+            f"&datetime=gte.{date_str}T03:30:00%2B00:00"
+            f"&datetime=lte.{date_str}T10:05:00%2B00:00"
             f"&order=datetime.asc"
         )
-        bars = requests.get(url, headers=sb_headers()).json()
-        if not bars:
+        resp = requests.get(url, headers=sb_headers())
+        bars = resp.json()
+        if not isinstance(bars, list) or not bars:
+            print(f"  Supabase returned: {resp.text[:200]}")
             return None
 
         # Previous close
         prev_url = (
             f"{SUPABASE_URL}/rest/v1/ohlcv_data"
-            f"?symbol=eq.NIFTY 50"
-            f"&datetime=lt.{date_str}T09:00:00+05:30"
+            f"?symbol=eq.NIFTY%2050"
+            f"&datetime=lt.{date_str}T03:30:00%2B00:00"
             f"&order=datetime.desc&limit=1"
         )
         prev = requests.get(prev_url, headers=sb_headers()).json()
@@ -116,20 +112,22 @@ def get_week_data():
 
         url = (
             f"{SUPABASE_URL}/rest/v1/ohlcv_data"
-            f"?symbol=eq.NIFTY 50"
-            f"&datetime=gte.{monday}T09:00:00+05:30"
-            f"&datetime=lte.{friday}T15:35:00+05:30"
+            f"?symbol=eq.NIFTY%2050"
+            f"&datetime=gte.{monday}T03:30:00%2B00:00"
+            f"&datetime=lte.{friday}T10:05:00%2B00:00"
             f"&order=datetime.asc"
         )
-        bars = requests.get(url, headers=sb_headers()).json()
-        if not bars:
+        resp = requests.get(url, headers=sb_headers())
+        bars = resp.json()
+        if not isinstance(bars, list) or not bars:
+            print(f"  Supabase returned: {resp.text[:200]}")
             return None
 
         # Previous week close
         prev_url = (
             f"{SUPABASE_URL}/rest/v1/ohlcv_data"
-            f"?symbol=eq.NIFTY 50"
-            f"&datetime=lt.{monday}T09:00:00+05:30"
+            f"?symbol=eq.NIFTY%2050"
+            f"&datetime=lt.{monday}T03:30:00%2B00:00"
             f"&order=datetime.desc&limit=1"
         )
         prev = requests.get(prev_url, headers=sb_headers()).json()
@@ -158,7 +156,7 @@ def get_top_movers(date_str):
         close_url = (
             f"{SUPABASE_URL}/rest/v1/ohlcv_data"
             f"?datetime=gte.{date_str}T15:14:00+05:30"
-            f"&datetime=lte.{date_str}T15:35:00+05:30"
+            f"&datetime=lte.{date_str}T10:05:00%2B00:00"
             f"&symbol=neq.NIFTY 50"
             f"&order=symbol.asc"
         )
@@ -166,12 +164,14 @@ def get_top_movers(date_str):
         open_url = (
             f"{SUPABASE_URL}/rest/v1/ohlcv_data"
             f"?datetime=gte.{date_str}T09:14:00+05:30"
-            f"&datetime=lte.{date_str}T09:35:00+05:30"
+            f"&datetime=lte.{date_str}T04:05:00%2B00:00"
             f"&symbol=neq.NIFTY 50"
             f"&order=symbol.asc"
         )
-        close_bars = requests.get(close_url, headers=sb_headers()).json()
-        open_bars  = requests.get(open_url,  headers=sb_headers()).json()
+        close_resp = requests.get(close_url, headers=sb_headers()).json()
+        open_resp  = requests.get(open_url,  headers=sb_headers()).json()
+        close_bars = close_resp if isinstance(close_resp, list) else []
+        open_bars  = open_resp  if isinstance(open_resp,  list) else []
 
         open_map = {b["symbol"]: b["open"] for b in open_bars}
         movers = []
@@ -220,13 +220,13 @@ def get_fii_dii_data():
         for item in data:
             cat = item.get("category", "").strip()
             if "FII" in cat or "FPI" in cat:
-                result["fii_net"] = item.get("netPurchasesSales", 0)
-                result["fii_buy"] = item.get("buyValue", 0)
-                result["fii_sell"] = item.get("sellValue", 0)
+                result["fii_net"]  = float(str(item.get("netValue",  0)).replace(",","") or 0)
+                result["fii_buy"]  = float(str(item.get("buyValue",  0)).replace(",","") or 0)
+                result["fii_sell"] = float(str(item.get("sellValue", 0)).replace(",","") or 0)
             elif "DII" in cat:
-                result["dii_net"] = item.get("netPurchasesSales", 0)
-                result["dii_buy"] = item.get("buyValue", 0)
-                result["dii_sell"] = item.get("sellValue", 0)
+                result["dii_net"]  = float(str(item.get("netValue",  0)).replace(",","") or 0)
+                result["dii_buy"]  = float(str(item.get("buyValue",  0)).replace(",","") or 0)
+                result["dii_sell"] = float(str(item.get("sellValue", 0)).replace(",","") or 0)
 
         if result:
             fii_net = result.get("fii_net", 0)
@@ -277,7 +277,7 @@ def web_search(query):
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-5",
             max_tokens=1500,
             tools=[{"type": "web_search_20250305", "name": "web_search"}],
             messages=[{"role": "user", "content": query}]
@@ -388,7 +388,7 @@ Write ~800 words covering:
 Title (first line, no prefix): Nifty 50 Pre-Market: [compelling hook] — {today}
 """
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-5",
         max_tokens=2000,
         system=STYLE_GUIDE,
         messages=[{"role": "user", "content": prompt}]
@@ -439,7 +439,7 @@ Write ~1200 words covering:
 Title (first line): Nifty 50 Weekly Wrap: [compelling hook] | Week of {week_data['week_start']} to {week_data['week_end']}
 """
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-5",
         max_tokens=3000,
         system=STYLE_GUIDE,
         messages=[{"role": "user", "content": prompt}]
@@ -478,7 +478,7 @@ Tone: NYT op-ed meets experienced market professional. Confident, specific, no f
 Title (first line): The Trader's Edge: [compelling title] | {today}
 """
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-5",
         max_tokens=2500,
         system=STYLE_GUIDE,
         messages=[{"role": "user", "content": prompt}]
