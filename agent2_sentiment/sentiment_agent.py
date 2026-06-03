@@ -18,11 +18,11 @@ import threading
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from shared.approval_server import start as start_approval_server_flask
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timezone
-from urllib.parse import urlparse, parse_qs
+
 
 from shared.config import (
     ANTHROPIC_API_KEY, SMTP_HOST, SMTP_PORT,
@@ -224,48 +224,7 @@ def send_approval_email(score_data):
     print(f"  ✓ Approval email sent to {NOTIFY_EMAIL}")
 
 
-# ── STEP 4: APPROVAL SERVER ───────────────────────────────────────
-
-class ApprovalHandler(BaseHTTPRequestHandler):
-    """
-    Tiny local HTTP server that listens for your approval click.
-    When you click 'Approve' in the email, this receives the request
-    and publishes the score to Ghost.
-    """
-    def do_GET(self):
-        parsed = urlparse(self.path)
-        if parsed.path == "/approve":
-            params = parse_qs(parsed.query)
-            score  = int(params.get("score", [0])[0])
-            label  = params.get("label", ["Neutral"])[0].replace("+", " ")
-            publish_score(score, label)
-
-            self.send_response(200)
-            self.send_header("Content-type", "text/html")
-            self.end_headers()
-            self.wfile.write(f"""
-            <html><body style="font-family:Georgia;text-align:center;padding:60px;background:#f8f8f6">
-            <h1 style="font-size:48px;color:#22c55e">✓</h1>
-            <h2>Score published</h2>
-            <p>Today's sentiment score of <strong>{'+' if score > 0 else ''}{score} ({label})</strong>
-            is now live on indianmarketguru.com</p>
-            </body></html>
-            """.encode())
-        else:
-            self.send_response(404)
-            self.end_headers()
-
-    def log_message(self, format, *args):
-        pass  # Suppress server logs
-
-
-def start_approval_server():
-    """Run the approval server in a background thread."""
-    server = HTTPServer(("localhost", APPROVAL_SERVER_PORT), ApprovalHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    print(f"  ✓ Approval server listening on port {APPROVAL_SERVER_PORT}")
-    return server
+# ── STEP 4: APPROVAL SERVER — handled by shared/approval_server.py ──
 
 
 def publish_score(score, label):
@@ -301,7 +260,7 @@ def run():
     print(f"{'='*50}")
 
     print("\n[1/4] Starting approval server...")
-    start_approval_server()
+    start_approval_server_flask()
 
     print("\n[2/4] Gathering inputs...")
     analysis  = get_latest_nifty_analysis()

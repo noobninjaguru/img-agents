@@ -2,7 +2,7 @@ import os
 
 ANTHROPIC_API_KEY    = os.environ.get("ANTHROPIC_API_KEY", "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")
 GHOST_URL            = os.environ.get("GHOST_URL", "https://indian-market-guru.ghost.io")
-GHOST_ADMIN_API_KEY  = os.environ.get("GHOST_ADMIN_API_KEY", "6a135d40e60f4f000140b4ce:5726f324abc21c60455cc63596565a0e98177f69f5fa3501e957866e9c8cbec5")
+GHOST_ADMIN_API_KEY  = os.environ.get("GHOST_ADMIN_API_KEY", "6a135d40e60f4f000140b4ce:15ab4f3f7ec86bd535129b0cdf5e957064dc3fa16fcfe6ff873cb6119505d544")
 SMTP_HOST            = os.environ.get("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT            = int(os.environ.get("SMTP_PORT", "465"))
 SMTP_USER            = os.environ.get("SMTP_USER", "Babi.naren@gmail.com")

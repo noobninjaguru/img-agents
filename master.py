@@ -18,6 +18,7 @@ import sys, os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from datetime import datetime
+from shared.approval_server import start as start_flask
 
 # Import all three agents
 from agent1_news.news_ticker_agent    import run as run_news
@@ -61,6 +62,7 @@ schedule.every().day.at("14:30").do(  # 14:30 UTC = 20:00 IST
 # ── STARTUP: RUN AGENT 1 IMMEDIATELY ────────────────────────────
 
 def startup():
+    start_flask()
     print("\n" + "="*55)
     print("  INDIAN MARKET GURU — Agent System Starting")
     print("="*55)
