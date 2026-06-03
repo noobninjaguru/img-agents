@@ -46,9 +46,11 @@ def is_weekday():
 schedule.every(2).hours.do(safe_run, "Agent 1 — News Ticker", run_news)
 
 # Agent 2: 8:30 AM IST, weekdays only
-schedule.every().day.at("03:00").do(  # 03:00 UTC = 08:30 IST
-    lambda: safe_run("Agent 2 — Sentiment", run_sentiment) if is_weekday() else None
-)
+def run_sentiment_weekday():
+    if is_weekday():
+        safe_run("Agent 2 — Sentiment", run_sentiment)
+
+schedule.every().day.at("03:00").do(run_sentiment_weekday)  # 03:00 UTC = 08:30 IST
 
 # Agent 3: 8:00 PM IST daily
 schedule.every().day.at("14:30").do(  # 14:30 UTC = 20:00 IST
