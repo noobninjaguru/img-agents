@@ -217,8 +217,7 @@ def send_approval_email(score_data):
     msg["To"]      = NOTIFY_EMAIL
     msg.attach(MIMEText(html, "html"))
 
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-        server.starttls()
+    with smtplib.SMTP_SSL(SMTP_HOST, 465) as server:
         server.login(SMTP_USER, SMTP_PASSWORD)
         server.send_message(msg)
 
