@@ -1,11 +1,14 @@
 """
 MASTER SCHEDULER — Indian Market Guru Agent System
 ====================================================
-Run this once and leave it running. It manages all three agents:
+Manages all six agents:
 
-  Agent 1 — News Ticker:     every 2 hours, all day
-  Agent 2 — Sentiment Score: 8:30 AM IST, weekdays only
-  Agent 3 — Editor-in-Chief: 8:00 PM IST daily
+  Agent 1 — News Ticker:       every 2 hours, all day
+  Agent 2 — Sentiment Score:   8:30 AM IST, weekdays only
+  Agent 3 — Editor-in-Chief:   8:00 PM IST daily
+  Agent 4 — Content Writer:    8:00 AM IST weekdays, 9:00 AM weekends
+  Agent 5 — Morning Analysis:  9:20 AM IST weekdays
+  Agent 6 — Nifty Live Price:  continuous background thread
 
 Start with:  python master.py
 Stop with:   Ctrl+C
@@ -20,14 +23,15 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from datetime import datetime
 from shared.approval_server import start as start_flask
 
-# Import all three agents
 from agent1_news.news_ticker_agent    import run as run_news
 from agent2_sentiment.sentiment_agent import run as run_sentiment
 from agent3_editor.editor_agent       import run as run_editor
+from agent4_content.content_agent     import run as run_content
+from agent5_morning.morning_agent     import run as run_morning
+from agent6_price.price_agent         import run as run_price
 
 
 def safe_run(agent_name, func, *args):
-    """Wrap agent runs so one failure doesn't kill the scheduler."""
     try:
         print(f"\n▶ Starting {agent_name}...")
         func(*args)
@@ -38,42 +42,67 @@ def safe_run(agent_name, func, *args):
 
 
 def is_weekday():
-    return datetime.now().weekday() < 5  # Mon-Fri
+    return datetime.now().weekday() < 5
 
 
-# ── SCHEDULE ALL AGENTS ──────────────────────────────────────────
+# ── SCHEDULES ────────────────────────────────────────────────────
 
 # Agent 1: every 2 hours
 schedule.every(2).hours.do(safe_run, "Agent 1 — News Ticker", run_news)
 
-# Agent 2: 8:30 AM IST, weekdays only
+# Agent 2: 8:30 AM IST weekdays (03:00 UTC)
 def run_sentiment_weekday():
     if is_weekday():
         safe_run("Agent 2 — Sentiment", run_sentiment)
+schedule.every().day.at("03:00").do(run_sentiment_weekday)
 
-schedule.every().day.at("03:00").do(run_sentiment_weekday)  # 03:00 UTC = 08:30 IST
+# Agent 3: 8:00 PM IST daily (14:30 UTC)
+schedule.every().day.at("14:30").do(safe_run, "Agent 3 — Editor-in-Chief", run_editor, "scheduled")
 
-# Agent 3: 8:00 PM IST daily
-schedule.every().day.at("14:30").do(  # 14:30 UTC = 20:00 IST
-    safe_run, "Agent 3 — Editor-in-Chief", run_editor, "scheduled"
-)
+# Agent 4: 8:00 AM IST weekdays (02:30 UTC), 9:00 AM IST weekends (03:30 UTC)
+def run_content_weekday():
+    if datetime.now().weekday() < 5:
+        safe_run("Agent 4 — Content Writer", run_content, "scheduled")
+
+def run_content_weekend():
+    if datetime.now().weekday() >= 5:
+        safe_run("Agent 4 — Content Writer", run_content, "scheduled")
+
+schedule.every().day.at("02:30").do(run_content_weekday)
+schedule.every().day.at("03:30").do(run_content_weekend)
+
+# Agent 5: 9:20 AM IST weekdays (03:50 UTC)
+def run_morning_weekday():
+    if is_weekday():
+        safe_run("Agent 5 — Morning Analysis", run_morning, "scheduled")
+schedule.every().day.at("03:50").do(run_morning_weekday)
 
 
-# ── STARTUP: RUN AGENT 1 IMMEDIATELY ────────────────────────────
+# ── STARTUP ──────────────────────────────────────────────────────
 
 def startup():
+    # Flask approval server
     start_flask()
+
     print("\n" + "="*55)
     print("  INDIAN MARKET GURU — Agent System Starting")
     print("="*55)
     print(f"  Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"  Agent 1 (News Ticker):     every 2 hours")
-    print(f"  Agent 2 (Sentiment Score): 08:30 IST weekdays")
-    print(f"  Agent 3 (Editor-in-Chief): 20:00 IST daily")
+    print(f"  Agent 1 (News Ticker):      every 2 hours")
+    print(f"  Agent 2 (Sentiment Score):  08:30 IST weekdays")
+    print(f"  Agent 3 (Editor-in-Chief):  20:00 IST daily")
+    print(f"  Agent 4 (Content Writer):   08:00 IST weekdays / 09:00 IST weekends")
+    print(f"  Agent 5 (Morning Analysis): 09:20 IST weekdays")
+    print(f"  Agent 6 (Nifty Price):      continuous background thread")
     print("="*55)
-    print("\n  Running Agent 1 immediately on startup...")
 
-    # Run news ticker immediately so site has fresh content right away
+    # Agent 6: start live price pusher in background thread
+    price_thread = threading.Thread(target=run_price, daemon=True)
+    price_thread.start()
+    print("  Agent 6 — Nifty Live Price: started in background")
+
+    # Agent 1: run immediately on startup
+    print("\n  Running Agent 1 immediately on startup...")
     thread = threading.Thread(
         target=safe_run,
         args=("Agent 1 — News Ticker (startup)", run_news),
@@ -86,39 +115,7 @@ def startup():
 
 if __name__ == "__main__":
     startup()
-
     print("\n  Scheduler running. Press Ctrl+C to stop.\n")
-
     while True:
         schedule.run_pending()
-        time.sleep(30)  # check every 30 seconds
-
-# Agent 4: Daily brief Mon-Fri 8AM IST (02:30 UTC), Sat/Sun 9AM IST (03:30 UTC)
-from agent4_content.content_agent import run as run_content
-
-def run_content_weekday():
-    if datetime.now().weekday() < 5:
-        safe_run("Agent 4 — Content Writer", run_content, "scheduled")
-
-def run_content_weekend():
-    if datetime.now().weekday() >= 5:
-        safe_run("Agent 4 — Content Writer", run_content, "scheduled")
-
-schedule.every().day.at("02:30").do(run_content_weekday)
-schedule.every().day.at("03:30").do(run_content_weekend)
-
-# Agent 5: Morning analysis at 9:20 AM IST (03:50 UTC) weekdays
-from agent5_morning.morning_agent import run as run_morning
-
-def run_morning_weekday():
-    if datetime.now().weekday() < 5:
-        safe_run("Agent 5 — Morning Analysis", run_morning, "scheduled")
-
-schedule.every().day.at("03:50").do(run_morning_weekday)
-
-# Agent 6: Nifty live price pusher — runs in background thread continuously
-from agent6_price.price_agent import run as run_price
-import threading
-price_thread = threading.Thread(target=run_price, daemon=True)
-price_thread.start()
-print("  Agent 6 — Nifty Live Price: started in background")
+        time.sleep(30)
