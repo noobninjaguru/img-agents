@@ -115,3 +115,10 @@ def run_morning_weekday():
         safe_run("Agent 5 — Morning Analysis", run_morning, "scheduled")
 
 schedule.every().day.at("03:50").do(run_morning_weekday)
+
+# Agent 6: Nifty live price pusher — runs in background thread continuously
+from agent6_price.price_agent import run as run_price
+import threading
+price_thread = threading.Thread(target=run_price, daemon=True)
+price_thread.start()
+print("  Agent 6 — Nifty Live Price: started in background")
