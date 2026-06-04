@@ -13,14 +13,12 @@ Runs at 8:30 AM IST every weekday (before market open at 9:15 AM).
 
 import json
 import anthropic
-import smtplib
+from shared.send_email import send_email
 import threading
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.approval_server import start as start_approval_server_flask
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timezone
 
 
@@ -211,16 +209,11 @@ def send_approval_email(score_data):
 </div>
 """
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"[IMG] Morning Sentiment: {'+' if score > 0 else ''}{score} ({label}) — {date_str}"
-    msg["From"]    = SMTP_USER
-    msg["To"]      = NOTIFY_EMAIL
-    msg.attach(MIMEText(html, "html"))
-
-    with smtplib.SMTP_SSL(SMTP_HOST, 465) as server:
-        server.login(SMTP_USER, SMTP_PASSWORD)
-        server.send_message(msg)
-
+    send_email(
+        to=NOTIFY_EMAIL,
+        subject=f"[IMG] Morning Sentiment: {'+' if score > 0 else ''}{score} ({label}) — {date_str}",
+        html=html
+    )
     print(f"  ✓ Approval email sent to {NOTIFY_EMAIL}")
 
 

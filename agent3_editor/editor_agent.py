@@ -20,12 +20,12 @@ Sends a private report to your email — never publishes anything.
 
 import json
 import anthropic
-import smtplib
+import sys, os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from shared.send_email import send_email
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 
 from shared.config import (
@@ -271,16 +271,11 @@ def send_editor_report(audit, posts):
 </div>
 """
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"[IMG Editor] Site Audit: {score}/10 — {date_str}"
-    msg["From"]    = SMTP_USER
-    msg["To"]      = NOTIFY_EMAIL
-    msg.attach(MIMEText(html, "html"))
-
-    with smtplib.SMTP_SSL(SMTP_HOST, 465) as server:
-        server.login(SMTP_USER, SMTP_PASSWORD)
-        server.send_message(msg)
-
+    send_email(
+        to=NOTIFY_EMAIL,
+        subject=f"[IMG Editor] Site Audit: {score}/10 — {date_str}",
+        html=html
+    )
     print(f"  ✓ Editor report sent to {NOTIFY_EMAIL}")
 
 
