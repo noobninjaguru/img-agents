@@ -106,3 +106,12 @@ def run_content_weekend():
 
 schedule.every().day.at("02:30").do(run_content_weekday)
 schedule.every().day.at("03:30").do(run_content_weekend)
+
+# Agent 5: Morning analysis at 9:20 AM IST (03:50 UTC) weekdays
+from agent5_morning.morning_agent import run as run_morning
+
+def run_morning_weekday():
+    if datetime.now().weekday() < 5:
+        safe_run("Agent 5 — Morning Analysis", run_morning, "scheduled")
+
+schedule.every().day.at("03:50").do(run_morning_weekday)
