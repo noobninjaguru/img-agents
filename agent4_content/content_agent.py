@@ -18,6 +18,9 @@ import json
 import re
 import requests
 import anthropic
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from shared.newsletter import send_newsletter
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -525,6 +528,8 @@ def publish_to_ghost(title, html_content, tags):
     res.raise_for_status()
     post = res.json()["posts"][0]
     print(f"  ✓ Published: \"{post['title']}\"")
+    post_url = f"{GHOST_URL}/{post.get('slug', '')}"
+    send_newsletter(post['title'], html_content, post_url, tags)
     return post
 
 

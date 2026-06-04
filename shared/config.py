@@ -33,3 +33,4 @@ RSS_FEEDS = [
 ]
 SUPABASE_URL         = os.environ.get("SUPABASE_URL", "https://bkdjdvzuwiwhcnzeorjx.supabase.co")
 SUPABASE_KEY         = os.environ.get("SUPABASE_KEY", "sb_secret_akIwQp4Ynze6tVinoEFgOg_qGQ08xxQ")
+RESEND_API_KEY       = os.environ.get("RESEND_API_KEY", "re_3oVSkESd_2JbgtWjxjiE5Ys62C6wyLfsb")
