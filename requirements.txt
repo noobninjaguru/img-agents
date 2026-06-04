@@ -5,3 +5,4 @@ schedule>=1.2.0
 PyJWT>=2.8.0
 flask>=3.0.0
 kiteconnect>=4.2.0
+pandas>=2.0.0
