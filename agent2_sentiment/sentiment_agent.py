@@ -225,7 +225,7 @@ def publish_score(score, label):
     from shared.config import GIST_SENTIMENT_ID
     import json
 
-    needle_pct = ((score + 50) / 100) * 100
+    needle_pct = 50 + (score / 100) * 50
     label_colour = {
         "Strongly bullish":   "#15803d",
         "Cautiously bullish": "#16a34a",
