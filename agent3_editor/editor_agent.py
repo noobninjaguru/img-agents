@@ -38,16 +38,8 @@ from shared.ghost_api import get_all_posts
 # ── STEP 1: GATHER SITE CONTENT ──────────────────────────────────
 
 def gather_site_content():
-    """Fetch recent posts using the public Content API — no auth needed."""
-    import requests
-    from shared.config import GHOST_URL
-    
-    CONTENT_KEY = "aef48258333e3c052c6a02ae54"
-    url = f"{GHOST_URL}/ghost/api/content/posts/?key={CONTENT_KEY}&limit=10&include=tags"
-    res = requests.get(url)
-    res.raise_for_status()
-    posts = res.json().get("posts", [])
-    return posts
+    """Fetch recent published posts via the Admin API (uses GHOST_ADMIN_API_KEY)."""
+    return get_all_posts(limit=10)
 
 
 # ── STEP 2: RUN THE AUDIT ─────────────────────────────────────────
