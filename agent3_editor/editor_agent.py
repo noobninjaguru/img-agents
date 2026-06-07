@@ -19,15 +19,13 @@ Sends a private report to your email — never publishes anything.
 """
 
 import json
+import sys, os
 import anthropic
-import sys, os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from shared.send_email import send_email
-import sys, os
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datetime import datetime
-
+from shared.send_email import send_email
 from shared.config import (
     ANTHROPIC_API_KEY, SMTP_HOST, SMTP_PORT,
     SMTP_USER, SMTP_PASSWORD, NOTIFY_EMAIL, GHOST_URL
@@ -135,16 +133,26 @@ Respond with a JSON object. No markdown, no preamble, valid JSON only.
 
     response = client.messages.create(
         model="claude-sonnet-4-5",
-        max_tokens=2000,
+        max_tokens=8000,
         messages=[{"role": "user", "content": prompt}]
     )
 
     raw = response.content[0].text.strip()
     start = raw.find("{")
     end = raw.rfind("}") + 1
-    if start != -1:
+    if start != -1 and end > start:
         raw = raw[start:end]
-    return json.loads(raw)
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        print(f"  ⚠ Audit JSON parse failed ({e}); sending raw text instead.")
+        return {
+            "overall_score": "—",
+            "overall_verdict": "Audit ran but the response wasn't valid JSON (likely truncated).",
+            "raw_output": raw[:6000],
+        }
+
 
 # ── STEP 3: FORMAT AND SEND EMAIL REPORT ─────────────────────────
 
@@ -159,9 +167,15 @@ def send_editor_report(audit, posts):
     coherence     = audit.get("coherence_check", {})
     priorities    = audit.get("top_3_priorities", [])
     subscriber    = audit.get("what_a_subscriber_would_say", "")
+    raw_output    = audit.get("raw_output", "")
     date_str      = datetime.now().strftime("%A, %d %B %Y")
 
-    score_colour  = "#22c55e" if score >= 7 else "#f59e0b" if score >= 5 else "#ef4444"
+    # Score may be a number normally, or "—" in the fallback case — coerce safely.
+    try:
+        score_num = float(score)
+    except (ValueError, TypeError):
+        score_num = 0
+    score_colour  = "#22c55e" if score_num >= 7 else "#f59e0b" if score_num >= 5 else "#ef4444"
 
     def section(title, content_html, border_colour="#0a0a0a"):
         return f"""
@@ -172,11 +186,24 @@ def send_editor_report(audit, posts):
 </div>
 """
 
+    # If JSON parsing failed, show the raw model output so the audit isn't lost.
+    raw_section = ""
+    if raw_output:
+        raw_section = section(
+            "Raw audit output (JSON parse failed)",
+            f'<pre style="font-size:11px;white-space:pre-wrap;color:#555">{raw_output}</pre>',
+            "#ef4444"
+        )
+
     # Build post-by-post reviews
     post_reviews_html = ""
     for pr in post_reviews:
         sc  = pr.get("score", 0)
-        col = "#22c55e" if sc >= 7 else "#f59e0b" if sc >= 5 else "#ef4444"
+        try:
+            sc_num = float(sc)
+        except (ValueError, TypeError):
+            sc_num = 0
+        col = "#22c55e" if sc_num >= 7 else "#f59e0b" if sc_num >= 5 else "#ef4444"
         post_reviews_html += f"""
 <div style="border:1px solid #e2e2e2;padding:12px 14px;margin-bottom:10px">
   <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
@@ -224,6 +251,8 @@ def send_editor_report(audit, posts):
       </div>
       <div style="font-size:14px;color:#333;margin-top:8px;font-style:italic">{verdict}</div>
     </div>
+
+    {raw_section}
 
     <!-- What a subscriber would say -->
     {section("What a paying subscriber would say", 
