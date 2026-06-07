@@ -18,11 +18,11 @@ from datetime import date, datetime, timezone, timedelta
 from shared.config import SUPABASE_URL, SUPABASE_KEY
 
 # ── CONFIG ────────────────────────────────────────────────────────
-API_KEY         = os.environ.get("ZERODHA_API_KEY",     "ei87fpolld9fkzsx")
-API_SECRET      = os.environ.get("ZERODHA_API_SECRET",  "jzwv6yo8i1xd01i9yfjls89ttt7m55ad")
-CF_ACCOUNT_ID   = os.environ.get("CF_ACCOUNT_ID",       "d1253ddb2e01032d77f94841dd9ae22d")
-CF_NAMESPACE_ID = os.environ.get("CF_NAMESPACE_ID",     "10aab537d39444ddb4f17597b61f5448")
-CF_API_TOKEN    = os.environ.get("CF_API_TOKEN",        "cfut_6rGrga1VO3mXCELldiPFGOJo8K46KAVsXWyRRQMuae11c4d4")
+API_KEY         = os.environ.get("ZERODHA_API_KEY")
+API_SECRET      = os.environ.get("ZERODHA_API_SECRET")
+CF_ACCOUNT_ID   = os.environ.get("CF_ACCOUNT_ID")
+CF_NAMESPACE_ID = os.environ.get("CF_NAMESPACE_ID")
+CF_API_TOKEN    = os.environ.get("CF_API_TOKEN")
 KV_KEY          = "nifty_price"
 POLL_INTERVAL   = 60
 
