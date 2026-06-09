@@ -10,6 +10,12 @@ Manages all six agents:
   Agent 5 — Morning Analysis:  9:20 AM IST weekdays
   Agent 6 — Nifty Live Price:  continuous background thread
 
+Each scheduled agent runs in its OWN thread (via run_threaded), so a
+long-running or blocking agent — e.g. Agent 2's approval wait — can never
+stall the main scheduler loop or hold up the agents queued behind it.
+(That blocking is what was delaying Agent 5, the 9:20 morning report, by
+up to two hours.)
+
 Start with:  python master.py
 Stop with:   Ctrl+C
 """
@@ -41,23 +47,37 @@ def safe_run(agent_name, func, *args):
         traceback.print_exc()
 
 
+def run_threaded(job_func, *args):
+    """Launch a scheduled job in its own daemon thread.
+
+    The main loop calls this, it returns instantly after spawning the
+    thread, and the actual work happens off the main loop. This is what
+    stops one blocking agent (Agent 2's 2-hour approval wait) from
+    freezing the scheduler and delaying everything behind it.
+    """
+    threading.Thread(target=job_func, args=args, daemon=True).start()
+
+
 def is_weekday():
     return datetime.now().weekday() < 5
 
 
 # ── SCHEDULES ────────────────────────────────────────────────────
+# Every job is dispatched through run_threaded(...) so each agent runs
+# in its own thread. The main loop only spawns threads; it never blocks.
 
 # Agent 1: every 2 hours
-schedule.every(2).hours.do(safe_run, "Agent 1 — News Ticker", run_news)
+schedule.every(2).hours.do(run_threaded, safe_run, "Agent 1 — News Ticker", run_news)
 
 # Agent 2: 8:30 AM IST weekdays (03:00 UTC)
 def run_sentiment_weekday():
     if is_weekday():
         safe_run("Agent 2 — Sentiment", run_sentiment)
-schedule.every().day.at("03:00").do(run_sentiment_weekday)
+schedule.every().day.at("03:00").do(run_threaded, run_sentiment_weekday)
 
 # Agent 3: 8:00 PM IST daily (14:30 UTC)
-schedule.every().day.at("14:30").do(safe_run, "Agent 3 — Editor-in-Chief", run_editor, "scheduled")
+schedule.every().day.at("14:30").do(
+    run_threaded, safe_run, "Agent 3 — Editor-in-Chief", run_editor, "scheduled")
 
 # Agent 4: 8:00 AM IST weekdays (02:30 UTC), 9:00 AM IST weekends (03:30 UTC)
 def run_content_weekday():
@@ -68,14 +88,14 @@ def run_content_weekend():
     if datetime.now().weekday() >= 5:
         safe_run("Agent 4 — Content Writer", run_content, "scheduled")
 
-schedule.every().day.at("02:30").do(run_content_weekday)
-schedule.every().day.at("03:30").do(run_content_weekend)
+schedule.every().day.at("02:30").do(run_threaded, run_content_weekday)
+schedule.every().day.at("03:30").do(run_threaded, run_content_weekend)
 
 # Agent 5: 9:20 AM IST weekdays (03:50 UTC)
 def run_morning_weekday():
     if is_weekday():
         safe_run("Agent 5 — Morning Analysis", run_morning, "scheduled")
-schedule.every().day.at("03:50").do(run_morning_weekday)
+schedule.every().day.at("03:50").do(run_threaded, run_morning_weekday)
 
 
 # ── STARTUP ──────────────────────────────────────────────────────
