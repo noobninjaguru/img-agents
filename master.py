@@ -35,6 +35,7 @@ from agent3_editor.editor_agent       import run as run_editor
 from agent4_content.content_agent     import run as run_content
 from agent5_morning.morning_agent     import run as run_morning
 from agent6_price.price_agent         import run as run_price
+from agent8_data.data_agent           import run_data_weekday
 
 
 def safe_run(agent_name, func, *args):
@@ -97,6 +98,9 @@ def run_morning_weekday():
         safe_run("Agent 5 — Morning Analysis", run_morning, "scheduled")
 schedule.every().day.at("03:50").do(run_threaded, run_morning_weekday)
 
+# Agent 8: 4:00 PM IST weekdays (10:30 UTC) — download today's bars to Supabase
+schedule.every().day.at("10:30").do(run_threaded, run_data_weekday)
+
 
 # ── STARTUP ──────────────────────────────────────────────────────
 
@@ -114,6 +118,7 @@ def startup():
     print(f"  Agent 4 (Content Writer):   08:00 IST weekdays / 09:00 IST weekends")
     print(f"  Agent 5 (Morning Analysis): 09:20 IST weekdays")
     print(f"  Agent 6 (Nifty Price):      continuous background thread")
+    print(f"  Agent 8 (Daily Data):       16:00 IST weekdays")
     print("="*55)
 
     # Agent 6: start live price pusher in background thread
