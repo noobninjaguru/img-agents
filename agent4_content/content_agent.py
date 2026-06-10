@@ -128,7 +128,9 @@ def get_day_data(date_str):
             "close": c, "prev_close": prev_close,
             "change_pts": chg_pts, "change_pct": chg_pct,
             "range": rng, "close_location_pct": close_loc,
-            "direction": "BULL" if c > o else "BEAR"
+            # Daily direction = previous-close-to-close (matches change_pct),
+            # so it never contradicts the headline % (an up day reads BULL).
+            "direction": "BULL" if chg_pts > 0 else ("BEAR" if chg_pts < 0 else "FLAT")
         }
     except Exception as e:
         print(f"  Day data error: {e}")
