@@ -19,6 +19,21 @@ up to two hours.)
 Start with:  python master.py
 Stop with:   Ctrl+C
 """
+# --- TEMP: NSE-from-Railway probe (remove after reading logs) ---
+try:
+    import requests as _rq
+    _h = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+          "AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "application/json, text/plain, */*",
+          "Referer": "https://www.nseindia.com/"}
+    _s = _rq.Session()
+    _s.get("https://www.nseindia.com", headers=_h, timeout=10)
+    _r = _s.get("https://www.nseindia.com/api/allIndices", headers=_h, timeout=10)
+    _v = [i for i in _r.json().get("data", []) if i.get("index","").upper().replace(" ","")=="INDIAVIX"]
+    print(f"[NSE PROBE] status={_r.status_code} vix={_v[0]['last'] if _v else 'NONE'}")
+except Exception as _e:
+    print(f"[NSE PROBE] FAILED: {_e}")
+# --- end probe ---
 
 import schedule
 import time
