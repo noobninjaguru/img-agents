@@ -5,7 +5,7 @@ Runs at 9:20 AM IST (03:50 UTC) every weekday.
 
 Replicates morning_analysis.py entirely on Railway:
 - Pulls historical OHLCV from Supabase (no local CSV needed)
-- Fetches today's opening price from Nifty live worker
+- Fetches today's opening price directly from Zerodha (worker as fallback)
 - Calculates all signals (gap, DOW bias, spillover, ORB, streak)
 - Sends formatted report email via Resend
 - Saves report to Supabase daily_reports table
@@ -13,6 +13,7 @@ Replicates morning_analysis.py entirely on Railway:
 
 import os
 import sys
+import json
 import requests
 import pandas as pd
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -23,6 +24,7 @@ from shared.config import SUPABASE_URL, SUPABASE_KEY, NOTIFY_EMAIL
 
 # ── CONFIG ────────────────────────────────────────────────────────
 NIFTY_WORKER_URL = "https://nifty-ticker.babi-naren.workers.dev"
+API_KEY          = os.environ.get("ZERODHA_API_KEY")
 
 DOW_BIAS = {
     0: ("Monday",    51.7, "neutral"),
@@ -174,21 +176,64 @@ def round_levels_near(price, step=100, count=7):
 
 # ── STEP 2: FETCH TODAY'S OPENING PRICE ───────────────────────────
 
-def get_today_open():
-    """Fetch live Nifty opening price from Cloudflare Worker."""
+def get_token_from_supabase():
+    """Read today's Zerodha access token from Supabase settings
+    (written by the Mac's 9:15 job — exactly how Agent 6 reads it)."""
+    try:
+        res = requests.get(
+            f"{SUPABASE_URL}/rest/v1/settings?key=eq.zerodha_access_token",
+            headers=sb_headers(),
+            timeout=10,
+        )
+        rows = res.json()
+        if not rows:
+            return None
+        data = json.loads(rows[0]["value"])
+        if data.get("date") != str(ist_now().date()):
+            print(f"  Token in Supabase is from {data.get('date')}, not today")
+            return None
+        return data.get("token")
+    except Exception as e:
+        print(f"  Token fetch error: {e}")
+        return None
+
+
+def get_open_from_worker():
+    """Fallback: read the live price from the Cloudflare worker."""
     try:
         res = requests.get(NIFTY_WORKER_URL, timeout=10)
         data = res.json()
         if data.get("market_open") and data.get("price"):
             price = float(data["price"])
-            print(f"  Live Nifty price: {price:,.2f} (market open)")
+            print(f"  Open via live worker (fallback): {price:,.2f}")
             return price
-        else:
-            print(f"  Market not open yet — gap analysis skipped")
-            return None
+        print("  Worker has no live price yet")
     except Exception as e:
         print(f"  Worker fetch failed: {e}")
-        return None
+    return None
+
+
+def get_today_open():
+    """Today's Nifty open — pulled straight from Zerodha (the exact 09:15
+    open), independent of when the live ticker warms up. Falls back to the
+    Cloudflare worker only if the direct fetch is unavailable."""
+    token = get_token_from_supabase()
+    if token:
+        try:
+            from kiteconnect import KiteConnect
+            kite = KiteConnect(api_key=API_KEY)
+            kite.set_access_token(token)
+            ohlc = kite.ohlc(["NSE:NIFTY 50"])["NSE:NIFTY 50"]["ohlc"]
+            open_price = float(ohlc["open"])
+            if open_price > 0:
+                print(f"  Today's open (Zerodha): {open_price:,.2f}")
+                return open_price
+            print("  Zerodha returned open=0 — trying worker...")
+        except Exception as e:
+            print(f"  Zerodha open fetch failed ({e}) — trying worker...")
+    else:
+        print("  No valid token in Supabase — trying worker...")
+    return get_open_from_worker()
 
 
 # ── STEP 3: BUILD REPORT ──────────────────────────────────────────
@@ -334,10 +379,10 @@ def build_report(daily, gap_stats, today_open, today):
 
 def save_to_supabase(report, report_date):
     try:
-        url = f"{SUPABASE_URL}/rest/v1/daily_reports"
+        url = f"{SUPABASE_URL}/rest/v1/daily_reports?on_conflict=report_date,report_type"
         res = requests.post(
             url,
-            headers={**sb_headers(), "Prefer": "resolution=merge-duplicates"},
+            headers={**sb_headers(), "Prefer": "resolution=merge-duplicates,return=minimal"},
             json={
                 "report_date": str(report_date),
                 "report_type": "premarket",
