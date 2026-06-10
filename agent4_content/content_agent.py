@@ -516,7 +516,8 @@ FORMAT RULES:
 - Reading time: ~5 min daily, ~8 min weekly wrap, ~6 min editorial
 """
 # ── STEP 5: GENERATE POSTS ────────────────────────────────────────
-def generate_daily_brief(day_data, gainers, losers, fii_dii_str, global_block, headlines):
+def generate_daily_brief(day_data, gainers, losers, fii_dii_str, global_block, headlines,
+                         show_inputs=False):
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     n      = ist_now()
     today  = n.strftime("%A, %d %B %Y")
@@ -552,6 +553,13 @@ def generate_daily_brief(day_data, gainers, losers, fii_dii_str, global_block, h
                      + "\n".join(news_bits))
     data_block = "\n\n".join(parts)
 
+    if show_inputs:
+        print("\n" + "-" * 60)
+        print("DATA BLOCK FED TO THE MODEL (the only facts it may state):")
+        print("-" * 60)
+        print(data_block)
+        print("-" * 60 + "\n")
+
     prompt = f"""Write a daily pre-market analysis post for {today}.
 
 === DATA BLOCK — the ONLY facts you may state ===
@@ -565,16 +573,21 @@ Hard rules:
   Do NOT recompute it or call the low-to-close move "the day's gain."
 - Explain market causes ONLY from the NEWS HEADLINES above. If the headlines don't
   explain a move, describe the price action without inventing a reason.
+- The ONLY US market figures you may state are the index % moves in the DATA BLOCK.
+  Do NOT name specific US stocks, cite company news, dollar amounts, percentages, or
+  futures/after-hours levels unless that exact detail is in the NEWS HEADLINES. If
+  it isn't there, leave it out — do not fill from memory.
+- GIFT Nifty's overnight move is ONLY a gauge of overnight global strength/weakness.
+  Do NOT use it to state or imply today's opening level, gap size, point target, or
+  even the direction Nifty will open. "Global tone is soft/firm" — nothing more.
 - If a section's data is absent from the DATA BLOCK (global cues, movers, FII/DII),
   SKIP that section entirely. Never write "unavailable," "N/A," or guess.
+- The title is plain text — no "#", no markdown heading marks, no quotes.
 
 Write ~700-800 words, including ONLY the sections you have data for:
 1. Yesterday's session recap — what happened, key levels tested, what the close tells us
-2. Global cues — ONLY if provided. State the US index % moves exactly as given. Do
-   NOT add specific US stock names, company news, dollar figures, or after-hours /
-   futures levels unless they appear in the NEWS HEADLINES. If GIFT Nifty's overnight
-   move is provided, use it ONLY as a read on overnight global strength/weakness —
-   do NOT turn it into an implied open, gap, or point target for today's Nifty.
+2. Global cues — ONLY if provided. State the US index % moves exactly as given, and
+   the GIFT overnight tone, within the limits in the Hard rules above.
 3. FII/DII activity — ONLY if provided; who bought/sold and what it implies
 4. Key levels for today — support/resistance you derive from the provided OHLC,
    framed as levels to watch
@@ -831,7 +844,7 @@ def run(trigger="scheduled", dry_run=False):
         global_block = get_global_cues(yest)
         print("\n[5/5] Fetching news + generating post...")
         headlines = get_latest_news()
-        content   = generate_daily_brief(day_data, gainers, losers, fii_dii_str, global_block, headlines)
+        content   = generate_daily_brief(day_data, gainers, losers, fii_dii_str, global_block, headlines, show_inputs=dry_run)
         title, html = content_to_html(content)
         publish_or_print(title, html, content, ["Daily Brief", "Market Analysis", "Nifty 50"], dry_run)
     print(f"\n✓ Agent 4 complete.\n")
