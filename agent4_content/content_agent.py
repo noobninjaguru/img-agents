@@ -1,5 +1,5 @@
 """
-AGENT 4 — Content Writer Agent  (v2 — data-grounded)
+AGENT 4 — Content Writer Agent  (v3 — date-anchored + real market-data feeds)
 ================================
 Post schedule (IST):
   Mon-Fri  08:00  → Daily Market Brief
@@ -7,22 +7,24 @@ Post schedule (IST):
   Sunday   09:00  → Editorial (global trends + trading education)
 Data sources:
   Nifty OHLCV + movers  → Supabase
-  FII/DII flows         → NSE API
-  India VIX             → NSE API (structured, reliable)   [v2]
-  Global cues           → JSON-validated web search (omittable) [v2]
+  FII/DII flows         → NSE API (date-checked against yesterday)   [v3]
+  India VIX             → NSE API (yesterday's close, pre-open only)  [v3]
+  US indices/crude/FX   → Twelve Data API (real feed)                [v3]
+  GIFT Nifty            → Zerodha Kite (NSEIX:GIFT NIFTY)             [v3]
   News headlines        → Agent 1 GitHub Gist
 
-v2 changes (content integrity):
-  • India VIX now comes straight from NSE (level + % change), not a fuzzy
-    web-search blob — fixes the inverted "VIX spiked" errors.
-  • Global cues (US indices / crude / GIFT / USDINR) come from a web search
-    that must return STRICT JSON; we parse + validate and pass only the fields
-    that came back. Anything missing is omitted, never guessed.
-  • Prompts rewritten: use ONLY the DATA BLOCK; never invent or recall a
-    market figure; use the provided change exactly (no low-to-close "gains");
-    explain causes ONLY from the provided news headlines; if a data point is
-    absent, OMIT the section — never write "unavailable" / "N/A" / guess.
-  • Removed the harmful fallback strings (incl. "use web search context").
+v3 changes (kills the date-muddle + the hallucinated globals):
+  • DATE-ANCHORING: every "yesterday" figure is tied to the actual last trading
+    day. VIX is used only pre-open (when NSE's live value IS yesterday's close);
+    FII/DII is used only when NSE's reported date matches yesterday. Off-hour
+    runs OMIT these rather than glue today's numbers onto a yesterday recap.
+  • REAL GLOBAL FEEDS replace the web search entirely: US indices / crude / USD-
+    INR from Twelve Data, GIFT Nifty (the pre-open gap) from Zerodha Kite. No
+    more hallucinated levels (e.g. the wrong Nasdaq 25,678 / wrong GIFT gap).
+  • Everything still omittable: any feed that fails is left out, never guessed.
+
+NOTE: GIFT needs a valid Zerodha token at run time — the Mac mint now runs 07:45
+so the 08:00 brief has one. VIX/FII-DII/Twelve Data need no token.
 """
 import json
 import re
@@ -32,12 +34,17 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared.newsletter import send_newsletter
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, time as dtime
 from shared.config import (
     ANTHROPIC_API_KEY, GHOST_URL,
     GIST_TICKER_URL, SUPABASE_URL, SUPABASE_KEY
 )
 from shared.ghost_api import ghost_headers
+
+# Secrets read straight from the environment (shared.config's .env loader has
+# already populated os.environ on the Mac; Railway injects them directly).
+TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY")
+ZERODHA_API_KEY    = os.environ.get("ZERODHA_API_KEY")
 
 # NSE session headers (shared by FII/DII + VIX fetchers)
 NSE_HEADERS = {
@@ -47,6 +54,25 @@ NSE_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
     "Referer": "https://www.nseindia.com/",
 }
+
+# Twelve Data symbols to pull for the global block. Each is fetched independently
+# and OMITTED if it errors — so a symbol your free tier doesn't cover just drops
+# out (never fabricated). If US indices come back empty on the free tier, swap to
+# the ETF proxies SPY / DIA / QQQ (free-tier, track the indices); the % change is
+# what the brief uses.
+TWELVEDATA_SYMBOLS = [
+    ("DJI",     "Dow Jones"),
+    ("SPX",     "S&P 500"),
+    ("IXIC",    "NASDAQ"),
+    ("BRENT",   "Brent crude (USD)"),
+    ("WTI",     "WTI crude (USD)"),
+    ("USD/INR", "USD/INR"),
+]
+
+def is_pre_open():
+    """True before the 09:15 IST cash open — the window where NSE's live VIX and
+    the latest published FII/DII still represent YESTERDAY's completed session."""
+    return ist_now().time() < dtime(9, 15)
 
 # ── SUPABASE HELPERS ──────────────────────────────────────────────
 def sb_headers():
@@ -192,6 +218,7 @@ def get_fii_dii_data():
         data = res.json()
         result = {}
         for item in data:
+            result.setdefault("date", item.get("date"))   # NSE-reported session date
             cat = item.get("category", "").strip()
             if "FII" in cat or "FPI" in cat:
                 result["fii_net"]  = float(str(item.get("netValue",  0)).replace(",","") or 0)
@@ -226,6 +253,92 @@ def get_india_vix():
     except Exception as e:
         print(f"  VIX fetch error: {e}")
     return None
+def get_yesterday_vix():
+    """India VIX for YESTERDAY's session. Only safe pre-open: before the 09:15
+    open, NSE's live 'last' VIX IS yesterday's close (+ yesterday's % change).
+    After the open it reflects today, so for a 'yesterday' brief we omit it
+    rather than glue today's value onto a yesterday recap."""
+    if not is_pre_open():
+        print("  Not pre-open — omitting VIX (can't pin yesterday's close)")
+        return None
+    return get_india_vix()
+def get_token_from_supabase():
+    """Read today's Zerodha access token from Supabase settings (minted by the
+    Mac's 07:45 job — same source Agents 5/6/7 use). Needed only for GIFT."""
+    try:
+        res = requests.get(
+            f"{SUPABASE_URL}/rest/v1/settings?key=eq.zerodha_access_token",
+            headers=sb_headers(), timeout=10,
+        )
+        rows = res.json()
+        if not rows:
+            return None
+        data = json.loads(rows[0]["value"])
+        if data.get("date") != str(ist_now().date()):
+            print(f"  Zerodha token is from {data.get('date')}, not today — skip GIFT")
+            return None
+        return data.get("token")
+    except Exception as e:
+        print(f"  Token fetch error: {e}")
+        return None
+def get_gift_nifty(nifty_prev_close=None):
+    """GIFT Nifty quote from Zerodha Kite (NSEIX:GIFT NIFTY) → the pre-open gap.
+    Omitted (returns None) if no valid token or the quote is unavailable."""
+    token = get_token_from_supabase()
+    if not token:
+        print("  No Zerodha token — omitting GIFT Nifty")
+        return None
+    try:
+        from kiteconnect import KiteConnect
+        kite = KiteConnect(api_key=ZERODHA_API_KEY)
+        kite.set_access_token(token)
+        q = kite.quote(["NSEIX:GIFT NIFTY"])["NSEIX:GIFT NIFTY"]
+        last = float(q.get("last_price") or 0)
+        if last <= 0:
+            print("  GIFT Nifty returned 0 — omitting")
+            return None
+        out = {"last": round(last, 2)}
+        if nifty_prev_close:
+            gap = round(last - nifty_prev_close, 2)
+            out["implied_gap"]     = gap
+            out["implied_gap_pct"] = round(gap / nifty_prev_close * 100, 2)
+        print(f"  GIFT Nifty: {last} (implied gap {out.get('implied_gap')})")
+        return out
+    except Exception as e:
+        print(f"  GIFT Nifty fetch failed: {e} — omitting")
+        return None
+def get_twelvedata_quote(symbol):
+    """Single /quote call → {level, pct}. Returns None on any error or plan
+    restriction, so an unsupported symbol is simply omitted, never fabricated."""
+    if not TWELVEDATA_API_KEY:
+        return None
+    try:
+        r = requests.get(
+            "https://api.twelvedata.com/quote",
+            params={"symbol": symbol, "apikey": TWELVEDATA_API_KEY},
+            timeout=12,
+        )
+        d = r.json()
+        if not isinstance(d, dict) or d.get("status") == "error" or "close" not in d:
+            if isinstance(d, dict) and d.get("message"):
+                print(f"  Twelve Data {symbol}: {str(d['message'])[:80]}")
+            return None
+        level = float(d["close"])
+        pct   = d.get("percent_change")
+        pct   = round(float(pct), 2) if pct not in (None, "") else None
+        return {"level": round(level, 2), "pct": pct}
+    except Exception as e:
+        print(f"  Twelve Data {symbol} error: {e}")
+        return None
+def get_global_market_data():
+    """US indices / crude / FX from Twelve Data — only the symbols that return."""
+    out = {}
+    for sym, label in TWELVEDATA_SYMBOLS:
+        q = get_twelvedata_quote(sym)
+        if q:
+            out[label] = q
+            print(f"  {label}: {q['level']} ({q['pct']}%)")
+    return out
 def format_fii_dii(data):
     """Format FII/DII for the data block. Returns '' if unavailable (so it's
     simply omitted — never a placeholder, never an instruction to fabricate)."""
@@ -241,6 +354,27 @@ def format_fii_dii(data):
         f"DII: {dii_dir} ₹{abs(dii_net):,.2f} Cr "
         f"(Buy: ₹{data.get('dii_buy',0):,.2f} Cr | Sell: ₹{data.get('dii_sell',0):,.2f} Cr)"
     )
+def fii_dii_for_yesterday(yesterday_date):
+    """Return formatted FII/DII ONLY if NSE's latest figures are actually for
+    yesterday_date. NSE publishes provisional flows in the evening, so an evening
+    run would otherwise pick up TODAY's numbers and mislabel them — this omits
+    them instead. Falls back to the pre-open guard if the date can't be parsed."""
+    data = get_fii_dii_data()
+    if not data:
+        return ""
+    d = data.get("date")
+    matches = False
+    if d:
+        try:
+            matches = datetime.strptime(d, "%d-%b-%Y").date() == yesterday_date
+        except Exception:
+            matches = False
+    if not matches and is_pre_open():
+        matches = True   # pre-open: the latest published flows ARE yesterday's
+    if not matches:
+        print(f"  FII/DII latest ({d}) != yesterday ({yesterday_date}) — omitting")
+        return ""
+    return format_fii_dii(data)
 # ── STEP 3: NEWS FROM AGENT 1 GIST ───────────────────────────────
 def get_latest_news():
     try:
@@ -270,72 +404,41 @@ def web_search(query):
     except Exception as e:
         print(f"  Web search error: {e}")
         return ""
-def get_global_cues_json():
-    """US indices / Asia / crude / GIFT / USDINR via a JSON-ONLY web search.
-    We parse + validate; only fields that come back are used, the rest omitted.
-    This is more reliable than a free-text blob, but still web-sourced — for
-    truly hard data we'd wire a market-data API (VIX is already NSE-direct)."""
-    today = ist_now().strftime("%Y-%m-%d")
-    query = (
-        "Search the web for the most recent available values as of " + today + ". "
-        "Return ONLY a single JSON object — no prose, no markdown fences. "
-        "Use this exact schema and set any value you cannot verify to null:\n"
-        '{"asof":"YYYY-MM-DD",'
-        '"dow":{"level":number,"pct":number},'
-        '"sp500":{"level":number,"pct":number},'
-        '"nasdaq":{"level":number,"pct":number},'
-        '"nikkei":{"level":number,"pct":number},'
-        '"hangseng":{"level":number,"pct":number},'
-        '"brent":number,"wti":number,"gift_nifty":number,"usdinr":number}\n'
-        "These must be the latest ACTUAL last/closing values. Do not guess — use null."
-    )
-    raw = web_search(query)
-    if not raw:
-        return None
-    raw = re.sub(r"```(?:json)?", "", raw).strip()
-    m = re.search(r"\{.*\}", raw, re.DOTALL)
-    if not m:
-        print("  Global cues: no JSON found in web result — omitting global section")
-        return None
-    try:
-        return json.loads(m.group(0))
-    except Exception as e:
-        print(f"  Global cues parse error ({e}) — omitting global section")
-        return None
-def build_global_block(vix, cues):
-    """Clean, labelled global block from ONLY validated fields. Missing → omitted."""
+def build_global_block(td_data, gift, vix):
+    """Clean, labelled global block from REAL feeds. Anything missing → omitted."""
     lines = []
-    def idx_line(label, d):
-        if isinstance(d, dict) and d.get("level") is not None:
-            pct = d.get("pct")
-            tail = f" ({pct:+.2f}%)" if isinstance(pct, (int, float)) else ""
-            lines.append(f"{label}: {d['level']}{tail}")
-    if isinstance(cues, dict):
-        idx_line("Dow Jones",  cues.get("dow"))
-        idx_line("S&P 500",    cues.get("sp500"))
-        idx_line("NASDAQ",     cues.get("nasdaq"))
-        idx_line("Nikkei 225", cues.get("nikkei"))
-        idx_line("Hang Seng",  cues.get("hangseng"))
-        for key, label in [("brent", "Brent crude (USD)"), ("wti", "WTI crude (USD)"),
-                           ("gift_nifty", "GIFT Nifty"), ("usdinr", "USD/INR")]:
-            v = cues.get(key)
-            if isinstance(v, (int, float)):
-                lines.append(f"{label}: {v}")
+    for label, q in (td_data or {}).items():
+        pct = q.get("pct")
+        tail = f" ({pct:+.2f}%)" if isinstance(pct, (int, float)) else ""
+        lines.append(f"{label}: {q['level']}{tail}")
+    if isinstance(gift, dict) and gift.get("last") is not None:
+        if gift.get("implied_gap") is not None:
+            g, gp = gift["implied_gap"], gift.get("implied_gap_pct")
+            pct_txt = f", {gp:+.2f}%" if isinstance(gp, (int, float)) else ""
+            lines.append(f"GIFT Nifty: {gift['last']} "
+                         f"(implied gap {g:+.0f} pts{pct_txt} vs yesterday's Nifty close)")
+        else:
+            lines.append(f"GIFT Nifty: {gift['last']}")
     if isinstance(vix, dict) and vix.get("last") is not None:
         pct = vix.get("pct")
         if isinstance(pct, (int, float)):
             direction = "FELL" if pct < 0 else ("ROSE" if pct > 0 else "flat")
-            lines.append(f"India VIX: {vix['last']} ({pct:+.2f}%) — VIX {direction}")
+            lines.append(f"India VIX (yesterday's close): {vix['last']} ({pct:+.2f}%) — VIX {direction}")
         else:
-            lines.append(f"India VIX: {vix['last']}")
+            lines.append(f"India VIX (yesterday's close): {vix['last']}")
     return "\n".join(lines)
-def get_global_cues():
-    """Assemble the global-cues block: NSE VIX (reliable) + validated web data."""
-    print("  Fetching India VIX from NSE...")
-    vix = get_india_vix()
-    print("  Fetching global cues (JSON-validated web search)...")
-    cues = get_global_cues_json()
-    return build_global_block(vix, cues)
+def get_global_cues(nifty_prev_close=None):
+    """Assemble the global block from REAL feeds:
+       US indices / crude / FX → Twelve Data
+       GIFT Nifty (pre-open gap) → Zerodha Kite
+       India VIX (yesterday's close) → NSE, pre-open only"""
+    print("  Fetching US indices / crude / FX (Twelve Data)...")
+    td = get_global_market_data()
+    print("  Fetching GIFT Nifty (Zerodha Kite)...")
+    gift = get_gift_nifty(nifty_prev_close)
+    print("  Fetching India VIX (NSE, yesterday's close)...")
+    vix = get_yesterday_vix()
+    return build_global_block(td, gift, vix)
 def get_editorial_research():
     print("  Searching editorial topics...")
     topic = web_search(
@@ -437,7 +540,8 @@ Hard rules:
 
 Write ~700-800 words, including ONLY the sections you have data for:
 1. Yesterday's session recap — what happened, key levels tested, what the close tells us
-2. Global cues — ONLY if provided; cite the given levels and what they signal
+2. Global cues — ONLY if provided; cite the given levels and what they signal. If a
+   GIFT Nifty implied gap is provided, use it to describe the expected open today.
 3. FII/DII activity — ONLY if provided; who bought/sold and what it implies
 4. Key levels for today — support/resistance you derive from the provided OHLC,
    framed as levels to watch
@@ -644,10 +748,10 @@ def run(trigger="scheduled"):
         print("\n[2/5] Fetching top movers...")
         friday = (n - timedelta(days=1)).date()
         gainers, losers = get_top_movers(str(friday))
-        print("\n[3/5] Fetching FII/DII from NSE...")
-        fii_dii_str = format_fii_dii(get_fii_dii_data())
-        print("\n[4/5] Fetching global cues...")
-        global_block = get_global_cues()
+        print("\n[3/5] Fetching FII/DII (date-anchored to Friday)...")
+        fii_dii_str = fii_dii_for_yesterday(friday)
+        print("\n[4/5] Fetching global cues (Twelve Data + GIFT + VIX)...")
+        global_block = get_global_cues(week_data.get("close"))
         print("\n[5/5] Fetching news + generating post...")
         headlines = get_latest_news()
         content   = generate_weekly_wrap(week_data, gainers, losers, fii_dii_str, global_block, headlines)
@@ -666,17 +770,18 @@ def run(trigger="scheduled"):
     elif dow <= 4:
         print(f"\n{day_name} → Daily Market Brief")
         print("\n[1/5] Fetching yesterday's data from Supabase...")
-        yesterday_date = str(last_trading_day())
+        yest           = last_trading_day()          # date object
+        yesterday_date = str(yest)
         day_data = get_day_data(yesterday_date)
         if not day_data:
             print("  ✗ No data found. Aborting.")
             return
         print("\n[2/5] Fetching top movers...")
         gainers, losers = get_top_movers(yesterday_date)
-        print("\n[3/5] Fetching FII/DII from NSE...")
-        fii_dii_str = format_fii_dii(get_fii_dii_data())
-        print("\n[4/5] Fetching global cues...")
-        global_block = get_global_cues()
+        print("\n[3/5] Fetching FII/DII (date-anchored to yesterday)...")
+        fii_dii_str = fii_dii_for_yesterday(yest)
+        print("\n[4/5] Fetching global cues (Twelve Data + GIFT + VIX)...")
+        global_block = get_global_cues(day_data.get("close"))
         print("\n[5/5] Fetching news + generating post...")
         headlines = get_latest_news()
         content   = generate_daily_brief(day_data, gainers, losers, fii_dii_str, global_block, headlines)
