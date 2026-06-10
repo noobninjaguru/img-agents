@@ -55,18 +55,20 @@ NSE_HEADERS = {
     "Referer": "https://www.nseindia.com/",
 }
 
-# Twelve Data symbols to pull for the global block. Each is fetched independently
-# and OMITTED if it errors — so a symbol your free tier doesn't cover just drops
-# out (never fabricated). If US indices come back empty on the free tier, swap to
-# the ETF proxies SPY / DIA / QQQ (free-tier, track the indices); the % change is
-# what the brief uses.
+# Twelve Data symbols for the global block. The free tier gates index/commodity
+# symbols (SPX, BRENT...) and mis-resolves bare "WTI" to a stock — so we use
+# free-tier ETF proxies and report their % change (which tracks the index/barrel;
+# the ETF's price level is NOT the index level, so we don't show it). Each symbol
+# is fetched independently and OMITTED if it errors — never fabricated.
+#   mode "pct"  → report % change only (ETF proxy for an index/commodity)
+#   mode "full" → report level + % change (a direct rate, e.g. FX)
 TWELVEDATA_SYMBOLS = [
-    ("DJI",     "Dow Jones"),
-    ("SPX",     "S&P 500"),
-    ("IXIC",    "NASDAQ"),
-    ("BRENT",   "Brent crude (USD)"),
-    ("WTI",     "WTI crude (USD)"),
-    ("USD/INR", "USD/INR"),
+    ("DIA",     "Dow Jones",   "pct"),   # tracks the Dow
+    ("SPY",     "S&P 500",     "pct"),   # tracks the S&P 500
+    ("QQQ",     "Nasdaq",      "pct"),   # tracks the Nasdaq-100
+    ("USO",     "WTI crude",   "pct"),   # tracks WTI
+    ("BNO",     "Brent crude", "pct"),   # tracks Brent
+    ("USD/INR", "USD/INR",     "full"),  # direct FX rate
 ]
 
 def is_pre_open():
@@ -333,11 +335,12 @@ def get_twelvedata_quote(symbol):
 def get_global_market_data():
     """US indices / crude / FX from Twelve Data — only the symbols that return."""
     out = {}
-    for sym, label in TWELVEDATA_SYMBOLS:
+    for sym, label, mode in TWELVEDATA_SYMBOLS:
         q = get_twelvedata_quote(sym)
         if q:
+            q["mode"] = mode
             out[label] = q
-            print(f"  {label}: {q['level']} ({q['pct']}%)")
+            print(f"  {label}: {q['level']} ({q['pct']}%) [{mode}]")
     return out
 def format_fii_dii(data):
     """Format FII/DII for the data block. Returns '' if unavailable (so it's
@@ -409,8 +412,12 @@ def build_global_block(td_data, gift, vix):
     lines = []
     for label, q in (td_data or {}).items():
         pct = q.get("pct")
-        tail = f" ({pct:+.2f}%)" if isinstance(pct, (int, float)) else ""
-        lines.append(f"{label}: {q['level']}{tail}")
+        if q.get("mode") == "pct":
+            if isinstance(pct, (int, float)):
+                lines.append(f"{label}: {pct:+.2f}%")
+        else:
+            tail = f" ({pct:+.2f}%)" if isinstance(pct, (int, float)) else ""
+            lines.append(f"{label}: {q['level']}{tail}")
     if isinstance(gift, dict) and gift.get("last") is not None:
         if gift.get("implied_gap") is not None:
             g, gp = gift["implied_gap"], gift.get("implied_gap_pct")
@@ -649,7 +656,7 @@ Title (first line): The Trader's Edge: [compelling title] | {today}
 def content_to_html(content):
     """Convert markdown-style content to HTML for Ghost."""
     lines  = content.strip().split('\n')
-    title  = lines[0].strip().strip('"')
+    title  = lines[0].strip().lstrip('#').strip().strip('"')
     body   = '\n'.join(lines[1:]).strip()
     html_parts = []
     for line in body.split('\n'):
@@ -728,14 +735,28 @@ def publish_to_ghost(title, html_content, tags):
     post_url = f"{GHOST_URL}/{post.get('slug', '')}"
     send_newsletter(post['title'], html_content, post_url, tags)
     return post
+def publish_or_print(title, html_content, raw_content, tags, dry_run):
+    """In dry-run mode, print the post to the terminal and DO NOT publish to Ghost
+    or send the newsletter — so test runs don't create live posts or emails."""
+    if dry_run:
+        print("\n" + "=" * 60)
+        print("DRY RUN — not published to Ghost, no newsletter sent")
+        print("=" * 60)
+        print(f"TITLE: {title}")
+        print(f"TAGS : {', '.join(tags)}")
+        print("-" * 60)
+        print(raw_content)
+        print("=" * 60 + "\n")
+        return None
+    return publish_to_ghost(title, html_content, tags)
 # ── MAIN ──────────────────────────────────────────────────────────
-def run(trigger="scheduled"):
+def run(trigger="scheduled", dry_run=False):
     n           = ist_now()
     dow         = n.weekday()
     day_name    = n.strftime("%A")
     print(f"\n{'='*55}")
     print(f"AGENT 4 — Content Writer  [{n.strftime('%Y-%m-%d %H:%M')} IST]")
-    print(f"Day: {day_name} | Trigger: {trigger}")
+    print(f"Day: {day_name} | Trigger: {trigger}" + ("  | DRY RUN" if dry_run else ""))
     print(f"{'='*55}")
     # ── SATURDAY: Weekly Wrap ─────────────────────────────────────
     if dow == 5:
@@ -756,7 +777,7 @@ def run(trigger="scheduled"):
         headlines = get_latest_news()
         content   = generate_weekly_wrap(week_data, gainers, losers, fii_dii_str, global_block, headlines)
         title, html = content_to_html(content)
-        publish_to_ghost(title, html, ["Weekly Wrap", "Market Analysis", "Nifty 50"])
+        publish_or_print(title, html, content, ["Weekly Wrap", "Market Analysis", "Nifty 50"], dry_run)
     # ── SUNDAY: Editorial ─────────────────────────────────────────
     elif dow == 6:
         print("\nSunday → Editorial")
@@ -765,7 +786,7 @@ def run(trigger="scheduled"):
         print("\n[2/2] Generating and publishing editorial...")
         content  = generate_editorial(research)
         title, html = content_to_html(content)
-        publish_to_ghost(title, html, ["Editorial", "Trading Education", "Market Analysis"])
+        publish_or_print(title, html, content, ["Editorial", "Trading Education", "Market Analysis"], dry_run)
     # ── MON-FRI: Daily Brief ──────────────────────────────────────
     elif dow <= 4:
         print(f"\n{day_name} → Daily Market Brief")
@@ -786,8 +807,11 @@ def run(trigger="scheduled"):
         headlines = get_latest_news()
         content   = generate_daily_brief(day_data, gainers, losers, fii_dii_str, global_block, headlines)
         title, html = content_to_html(content)
-        publish_to_ghost(title, html, ["Daily Brief", "Market Analysis", "Nifty 50"])
+        publish_or_print(title, html, content, ["Daily Brief", "Market Analysis", "Nifty 50"], dry_run)
     print(f"\n✓ Agent 4 complete.\n")
 if __name__ == "__main__":
-    trigger = sys.argv[1] if len(sys.argv) > 1 else "manual"
-    run(trigger)
+    args     = sys.argv[1:]
+    flags    = ("--dry-run", "dry-run", "dryrun")
+    dry_run  = any(a in flags for a in args)
+    trigger  = next((a for a in args if a not in flags), "manual")
+    run(trigger, dry_run=dry_run)
