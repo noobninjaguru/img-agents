@@ -283,9 +283,12 @@ def get_token_from_supabase():
     except Exception as e:
         print(f"  Token fetch error: {e}")
         return None
-def get_gift_nifty(nifty_prev_close=None):
-    """GIFT Nifty quote from Zerodha Kite (NSEIX:GIFT NIFTY) → the pre-open gap.
-    Omitted (returns None) if no valid token or the quote is unavailable."""
+def get_gift_nifty(ref_date=None):
+    """GIFT Nifty as an OVERNIGHT GLOBAL-SENTIMENT read — how GIFT has moved from
+    ~yesterday's 15:30 IST (the Indian cash close) to now, which reflects the
+    global session while India was shut. Returns level + overnight %. It does NOT
+    compute an implied Nifty open/gap (that needs the Nifty-futures basis, which
+    we deliberately don't attempt). Omitted if no token or quote unavailable."""
     token = get_token_from_supabase()
     if not token:
         print("  No Zerodha token — omitting GIFT Nifty")
@@ -300,11 +303,30 @@ def get_gift_nifty(nifty_prev_close=None):
             print("  GIFT Nifty returned 0 — omitting")
             return None
         out = {"last": round(last, 2)}
-        if nifty_prev_close:
-            gap = round(last - nifty_prev_close, 2)
-            out["implied_gap"]     = gap
-            out["implied_gap_pct"] = round(gap / nifty_prev_close * 100, 2)
-        print(f"  GIFT Nifty: {last} (implied gap {out.get('implied_gap')})")
+
+        # Reference point: GIFT's value near yesterday 15:30 IST (Indian close).
+        # Use Kite historical (we already have the add-on via daily_update.py);
+        # fall back to the quote's previous close if historical isn't available.
+        ref = None
+        gift_token = q.get("instrument_token")
+        if gift_token and ref_date:
+            try:
+                frm = datetime(ref_date.year, ref_date.month, ref_date.day, 15, 0)
+                to  = datetime(ref_date.year, ref_date.month, ref_date.day, 15, 40)
+                bars = kite.historical_data(gift_token, frm, to, "5minute")
+                if bars:
+                    ref = float(bars[-1]["close"])   # ~15:35 close ≈ 15:30 reference
+            except Exception as e:
+                print(f"  GIFT historical lookup failed ({e}) — using prev close")
+        if ref is None:
+            pc = q.get("ohlc", {}).get("close")
+            ref = float(pc) if pc else None
+
+        if ref:
+            chg = round(last - ref, 2)
+            out["overnight_chg"] = chg
+            out["overnight_pct"] = round(chg / ref * 100, 2)
+        print(f"  GIFT Nifty: {last} (overnight {out.get('overnight_pct')}% vs ~prev close)")
         return out
     except Exception as e:
         print(f"  GIFT Nifty fetch failed: {e} — omitting")
@@ -419,11 +441,12 @@ def build_global_block(td_data, gift, vix):
             tail = f" ({pct:+.2f}%)" if isinstance(pct, (int, float)) else ""
             lines.append(f"{label}: {q['level']}{tail}")
     if isinstance(gift, dict) and gift.get("last") is not None:
-        if gift.get("implied_gap") is not None:
-            g, gp = gift["implied_gap"], gift.get("implied_gap_pct")
-            pct_txt = f", {gp:+.2f}%" if isinstance(gp, (int, float)) else ""
-            lines.append(f"GIFT Nifty: {gift['last']} "
-                         f"(implied gap {g:+.0f} pts{pct_txt} vs yesterday's Nifty close)")
+        pct = gift.get("overnight_pct")
+        if isinstance(pct, (int, float)):
+            tone = ("firmer — global strength" if pct > 0
+                    else "softer — global weakness" if pct < 0 else "flat")
+            lines.append(f"GIFT Nifty: {gift['last']} ({pct:+.2f}% overnight since prior "
+                         f"Indian close) — global tone {tone}")
         else:
             lines.append(f"GIFT Nifty: {gift['last']}")
     if isinstance(vix, dict) and vix.get("last") is not None:
@@ -434,15 +457,15 @@ def build_global_block(td_data, gift, vix):
         else:
             lines.append(f"India VIX (yesterday's close): {vix['last']}")
     return "\n".join(lines)
-def get_global_cues(nifty_prev_close=None):
+def get_global_cues(ref_date=None):
     """Assemble the global block from REAL feeds:
        US indices / crude / FX → Twelve Data
-       GIFT Nifty (pre-open gap) → Zerodha Kite
+       GIFT Nifty (overnight global-tone read) → Zerodha Kite
        India VIX (yesterday's close) → NSE, pre-open only"""
     print("  Fetching US indices / crude / FX (Twelve Data)...")
     td = get_global_market_data()
-    print("  Fetching GIFT Nifty (Zerodha Kite)...")
-    gift = get_gift_nifty(nifty_prev_close)
+    print("  Fetching GIFT Nifty (Zerodha Kite, overnight move)...")
+    gift = get_gift_nifty(ref_date)
     print("  Fetching India VIX (NSE, yesterday's close)...")
     vix = get_yesterday_vix()
     return build_global_block(td, gift, vix)
@@ -547,8 +570,11 @@ Hard rules:
 
 Write ~700-800 words, including ONLY the sections you have data for:
 1. Yesterday's session recap — what happened, key levels tested, what the close tells us
-2. Global cues — ONLY if provided; cite the given levels and what they signal. If a
-   GIFT Nifty implied gap is provided, use it to describe the expected open today.
+2. Global cues — ONLY if provided. State the US index % moves exactly as given. Do
+   NOT add specific US stock names, company news, dollar figures, or after-hours /
+   futures levels unless they appear in the NEWS HEADLINES. If GIFT Nifty's overnight
+   move is provided, use it ONLY as a read on overnight global strength/weakness —
+   do NOT turn it into an implied open, gap, or point target for today's Nifty.
 3. FII/DII activity — ONLY if provided; who bought/sold and what it implies
 4. Key levels for today — support/resistance you derive from the provided OHLC,
    framed as levels to watch
@@ -772,7 +798,7 @@ def run(trigger="scheduled", dry_run=False):
         print("\n[3/5] Fetching FII/DII (date-anchored to Friday)...")
         fii_dii_str = fii_dii_for_yesterday(friday)
         print("\n[4/5] Fetching global cues (Twelve Data + GIFT + VIX)...")
-        global_block = get_global_cues(week_data.get("close"))
+        global_block = get_global_cues(friday)
         print("\n[5/5] Fetching news + generating post...")
         headlines = get_latest_news()
         content   = generate_weekly_wrap(week_data, gainers, losers, fii_dii_str, global_block, headlines)
@@ -802,7 +828,7 @@ def run(trigger="scheduled", dry_run=False):
         print("\n[3/5] Fetching FII/DII (date-anchored to yesterday)...")
         fii_dii_str = fii_dii_for_yesterday(yest)
         print("\n[4/5] Fetching global cues (Twelve Data + GIFT + VIX)...")
-        global_block = get_global_cues(day_data.get("close"))
+        global_block = get_global_cues(yest)
         print("\n[5/5] Fetching news + generating post...")
         headlines = get_latest_news()
         content   = generate_daily_brief(day_data, gainers, losers, fii_dii_str, global_block, headlines)
